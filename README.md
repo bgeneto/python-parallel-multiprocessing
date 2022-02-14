@@ -17,6 +17,6 @@ by calculating the Pi value via Monte Carlo algorithm.
 | ProcessPoolExecutor | 0.2698220  | 1.2328661  |
 | mpire               | 1.5323328  | 5.1917256  |
 
-For such small task, ThreadPool is better in Windows and ProcessPool in faster in Linux.
+For such small task, ThreadPool is better in Windows and ProcessPool is faster under Linux.
 
 **Conclusion:** use process backend with Linux and threads backend with Windows.
