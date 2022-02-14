@@ -1,4 +1,4 @@
-dask[distributed]
+dask
 joblib
 mpire
 ray
