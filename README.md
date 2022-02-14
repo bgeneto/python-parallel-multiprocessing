@@ -3,7 +3,7 @@
 Test python parallel libraries performance under Linux and Windows 
 by calculating the Pi value via Monte Carlo algorithm. 
 
-(Parallel processing with Python 3 is generally very tricky)
+(Parallel processing with Python 3 is generally very tricky and inconsistent across OSes)
 
 |                     | Linux 5.10 | Windows 11 |
 |---------------------|------------|------------|
