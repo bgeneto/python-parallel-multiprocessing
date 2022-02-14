@@ -1,70 +1,168 @@
-import math
-import ray
-from dask.distributed import Client
-from joblib import Parallel, delayed
-from mpire import WorkerPool
+import operator
+import os
+import random
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from functools import reduce
+from multiprocessing import Pool
+from multiprocessing.pool import ThreadPool
 from timeit import default_timer as timer
 
-def some_function(x: float, y: float, z: float) -> float:
-    return (x * y)**2 / math.sqrt(abs(z+0.0625))
+import ray
+from dask import compute, delayed
+from joblib import Parallel, delayed
+from mpire import WorkerPool
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from multiprocessing import Pool
+
+def seq_pi(npts):
+    inside_pts = 0
+
+    # Total Random numbers generated = x_values * y_values
+    for _ in range(npts):
+
+        # Randomly generated x and y values from a uniform distribution
+        # Range of x and y values is -1 to 1
+        rand_x = random.uniform(-1, 1)
+        rand_y = random.uniform(-1, 1)
+
+        # Distance between (x, y) from the origin
+        d = rand_x**2 + rand_y**2
+
+        # Checking if (x, y) lies inside the circle
+        if d <= 1:
+            inside_pts += 1
+
+        # Estimating value of pi,
+        # pi= 4*(no. of points generated inside the
+        # circle) / (no. of points generated inside the square)
+    pi = 4 * inside_pts / npts
+
+    return pi
+
+
+def map_pi(r):
+    rand_x = random.uniform(-1, 1)
+    rand_y = random.uniform(-1, 1)
+    return int(rand_x**2 + rand_y**2 <= 1)
+
+
+@delayed
+def delayed_pi(r):
+    rand_x = random.uniform(-1, 1)
+    rand_y = random.uniform(-1, 1)
+    return int(rand_x**2 + rand_y**2 <= 1)
+
 
 def main():
-    data = [(x, y, z) for x, y, z in zip(range(1, 10000), range(42, 420000), range(23, 230000))]
+    # number of points generated
+    npts = 2**19
 
-    # Serial processing
-    start = timer()
-    results = [some_function(x, y, z) for x, y, z in data]
-    end = timer()
-    print(f"Serial time: {(end-start):.4f}")
+    # sequence for map function
+    r = range(npts)
 
-    # Multiprocessing
-    start = timer()
-    with Pool(processes=5) as pool:
-        results = pool.starmap(some_function, data)
-    end = timer()
-    print(f"Multiprocessing time: {(end-start):.4f}")
+    # use all threads avail
+    nthreads = os.cpu_count()
 
-    # MPIRE
+    # classical single threaded function
     start = timer()
-    with WorkerPool(n_jobs=5) as pool:
-        results = pool.map(some_function, data)
+    pi = seq_pi(npts)
     end = timer()
-    print(f"MPIRE time: {(end-start):.4f}")
+    print(f"sequential pi estimation = {pi}")
+    print(f"seq. time = {end-start:.7f}\n")
 
-    # Joblib
+    # single threaded map function
     start = timer()
-    results = Parallel(n_jobs=5)(delayed(some_function)(x, y, z) for x, y, z in data)
+    results = map(map_pi, r)
+    pi = 4 * reduce(operator.add, results) / npts
     end = timer()
-    print(f"Joblib time: {(end-start):.4f}")
+    print(f"sequential pi estimation (map) = {pi}")
+    print(f"map. time = {end-start:.7f}\n")
+
+    # joblib with manual optimization
+    start = timer()
+    results = Parallel(n_jobs=nthreads,
+                       batch_size=1024*nthreads,
+                       prefer='threads'
+                       )(delayed(map_pi)(r) for r in range(npts))
+    pi = 4 * reduce(operator.add, results) / npts
+    end = timer()
+    print(f"parallel pi estimation (joblib - opt) = {pi}")
+    print(f"opt joblib time = {end-start:.7f}\n")
+
+    # joblib auto backend and chunksize
+    start = timer()
+    results = Parallel(n_jobs=nthreads
+                       )(delayed(map_pi)(r) for r in range(npts))
+    pi = 4 * reduce(operator.add, results) / npts
+    end = timer()
+    print(f"parallel pi estimation (joblib) = {pi}")
+    print(f"joblib time = {end-start:.7f}\n")
+
+    # multiprocessing Pool map
+    start = timer()
+    with Pool(processes=nthreads) as pool:
+        results = pool.map(map_pi, r, chunksize=1024*nthreads)
+    pi = 4 * reduce(operator.add, results) / npts
+    end = timer()
+    print(f"parallel pi estimation (ProcessPool map) = {pi}")
+    print(f"ProcessPool map time = {end-start:.7f}\n")
+
+    # multiprocessing ThreadPool map
+    start = timer()
+    with ThreadPool(processes=nthreads) as pool:
+        results = pool.map(map_pi, r, chunksize=1024*nthreads)
+    pi = 4 * reduce(operator.add, results) / npts
+    end = timer()
+    print(f"parallel pi estimation (ThreadPool map) = {pi}")
+    print(f"ThreadPool map time = {end-start:.7f}\n")
+
+    # ThreadPoolExecutor
+    start = timer()
+    with ThreadPoolExecutor(nthreads) as pool:
+        results = pool.map(map_pi, r, chunksize=1024*nthreads)
+    pi = 4 * reduce(operator.add, results) / npts
+    end = timer()
+    print(f"parallel pi estimation (ThreadPoolExecutor) = {pi}")
+    print(f"ThreadPoolExecutor time = {end-start:.7f}\n")
 
     # ProcessPoolExecutor
     start = timer()
-    with ProcessPoolExecutor(max_workers=5) as pool:
-        futures = [pool.submit(some_function, x, y, z) for x, y, z in data]
-        results = [future.result() for future in as_completed(futures)]
+    with ProcessPoolExecutor(nthreads) as pool:
+        results = pool.map(map_pi, r, chunksize=1024*nthreads)
+    pi = 4 * reduce(operator.add, results) / npts
     end = timer()
-    print(f"ProcessPoolExecutor time: {(end-start):.4f}")
+    print(f"parallel pi estimation (ProcessPoolExecutor) = {pi}")
+    print(f"ProcessPoolExecutor time = {end-start:.7f}\n")
+
+    # mpire
+    start = timer()
+    with WorkerPool(n_jobs=nthreads) as pool:
+        results = pool.map(map_pi, r)
+    pi = 4 * reduce(operator.add, results) / npts
+    end = timer()
+    print(f"parallel pi estimation (mpire) = {pi}")
+    print(f"mpire map time = {end-start:.7f}\n")
 
     # Dask
-    start = timer()
-    client = Client(n_workers=5)
-    results = client.gather([client.submit(some_function, x, y, z) for x, y, z in data])
-    client.close()
-    end = timer()
-    print(f"Dask time: {(end-start):.4f}")
+    #start = timer()
+    #l = []
+    # for r in range(npts):
+    #    l.append(delayed_pi(r))
+    #results = compute(*l)
+    #pi = 4 * reduce(operator.add, results) / npts
+    #end = timer()
+    #print(f"parallel pi estimation (dask) = {pi}")
+    #print(f"Dask time: {(end-start):.7f}")
 
     # Ray
-    start = timer()
-    ray.init(num_cpus=5)
-    remote_function = ray.remote(some_function)
-    results = ray.get([remote_function.remote(x, y, z) for x, y, z in data])
-    ray.shutdown()
-    end = timer()
-    print(f"Ray time: {(end-start):.4f}")
-
+    # start = timer()
+    # ray.init(num_cpus=nthreads)
+    # remote_function = ray.remote(map_pi)
+    # results = ray.get([remote_function.remote(r) for r in range(npts)])
+    # ray.shutdown()
+    # pi = 4 * reduce(operator.add, results) / npts
+    # end = timer()
+    # print(f"parallel pi estimation (ray) = {pi}")
+    # print(f"Ray time: {(end-start):.7f}")
 
 
 if __name__ == "__main__":
